@@ -17,21 +17,24 @@ const FILE_PREFIX = 'mizo-mo'
 
 const Receipt: React.FC<Props> = ({ record, onClose }) => {
   const receiptRef = useRef<HTMLDivElement>(null)
+  const socialMediaRef = useRef<HTMLDivElement>(null)
   const [qrUrl, setQrUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const { settings } = useSettings()
   const { showToast } = useToast()
 
   useEffect(() => {
-    const text = `SRS | ${record.reference_number} | ${record.name} | ${record.amount} | ${record.date}`
+    // استخدام created_at للحصول على التاريخ والوقت الصحيح
+    const createdDate = new Date(record.created_at).toLocaleString('ar-EG')
+    const text = `SRS | ${record.reference_number} | ${record.name} | ${record.amount} | ${createdDate}`
     QRCode.toDataURL(text, { width: 120, margin: 1, color: { dark: '#1e3a8a', light: '#ffffff' } })
       .then(setQrUrl)
   }, [record])
 
-  // التقاط صورة الإيصال بجودة عالية
-  const captureCanvas = async (): Promise<HTMLCanvasElement> => {
-    if (!receiptRef.current) throw new Error('No receipt ref')
-    return await html2canvas(receiptRef.current, {
+  // التقاط صورة بجودة عالية من أي ref
+  const captureCanvas = async (ref: React.RefObject<HTMLDivElement>): Promise<HTMLCanvasElement> => {
+    if (!ref.current) throw new Error('No ref')
+    return await html2canvas(ref.current, {
       scale: 3,
       useCORS: true,
       allowTaint: true,
@@ -41,7 +44,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     })
   }
 
-  // تنزيل الصورة مباشرة بدون أي قيود
+  // تنزيل الصورة مباشرة
   const triggerDownload = (dataUrl: string, filename: string) => {
     const a = document.createElement('a')
     a.href = dataUrl
@@ -57,7 +60,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     if (busy) return
     setBusy(true)
     try {
-      const canvas = await captureCanvas()
+      const canvas = await captureCanvas(receiptRef)
       triggerDownload(canvas.toDataURL('image/png'), `${FILE_PREFIX}-receipt-${record.reference_number}.png`)
       showToast('success', '✅ تم تنزيل الإيصال PNG')
     } catch { showToast('error', 'فشل تنزيل PNG') }
@@ -69,7 +72,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     if (busy) return
     setBusy(true)
     try {
-      const canvas = await captureCanvas()
+      const canvas = await captureCanvas(receiptRef)
       triggerDownload(canvas.toDataURL('image/jpeg', 0.95), `${FILE_PREFIX}-receipt-${record.reference_number}.jpg`)
       showToast('success', '✅ تم تنزيل الإيصال JPG')
     } catch { showToast('error', 'فشل تنزيل JPG') }
@@ -81,7 +84,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     if (busy) return
     setBusy(true)
     try {
-      const canvas = await captureCanvas()
+      const canvas = await captureCanvas(receiptRef)
       const imgData = canvas.toDataURL('image/png')
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' })
       const w = pdf.internal.pageSize.getWidth()
@@ -98,31 +101,31 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     if (busy) return
     setBusy(true)
     try {
-      const canvas = await captureCanvas()
+      const canvas = await captureCanvas(receiptRef)
       const win = window.open('', '_blank')
       if (!win) { showToast('error', 'يرجى السماح بالنوافذ المنبثقة'); setBusy(false); return }
-      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}</style></head><body><img src="${canvas.toDataURL('image/png')}" /></body></html>`)
+      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}</style></head><body><img src="${canvas.toDataURL('image/png')}"/></body></html>`)
       win.document.close()
       setTimeout(() => { win.focus(); win.print() }, 500)
     } catch { showToast('error', 'فشلت الطباعة') }
     setBusy(false)
   }
 
-  // ---- المشاركة: ينزّل الصورة دائماً ثم يفتح التطبيق ----
+  // ---- المشاركة بصورة كاملة واضحة ----
   const shareToApp = async (appUrl: string, appName: string) => {
     if (busy) return
     setBusy(true)
     showToast('info', `⏳ جاري تجهيز صورة الإيصال...`)
     try {
-      const canvas = await captureCanvas()
-      const filename = `${FILE_PREFIX}-receipt-${record.reference_number}.png`
+      const canvas = await captureCanvas(socialMediaRef)
+      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
 
-      // 1️⃣ إنشاء الـ Blob من الصورة
+      // إنشاء الـ Blob من الصورة
       const blob = await new Promise<Blob>((res, rej) =>
         canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
       )
 
-      // 2️⃣ محاولة استخدام Web Share API (موبايل)
+      // محاولة استخدام Web Share API (موبايل)
       if (navigator.share) {
         try {
           const file = new File([blob], filename, { type: 'image/png' })
@@ -137,11 +140,9 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
         }
       }
 
-      // 3️⃣ كمبيوتر: نزّل الصورة وافتح التطبيق
+      // كمبيوتر: نزّل الصورة وافتح التطبيق
       triggerDownload(canvas.toDataURL('image/png'), filename)
       showToast('success', `✅ تم حفظ الصورة — جاري فتح ${appName}...`)
-      
-      // افتح التطبيق بعد تحميل الصورة
       setTimeout(() => window.open(appUrl, '_blank'), 1200)
     } catch (e: unknown) {
       if (!(e instanceof Error && e.name === 'AbortError')) {
@@ -157,8 +158,8 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     setBusy(true)
     showToast('info', '⏳ جاري تجهيز صورة الإيصال...')
     try {
-      const canvas = await captureCanvas()
-      const filename = `${FILE_PREFIX}-receipt-${record.reference_number}.png`
+      const canvas = await captureCanvas(socialMediaRef)
+      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
       const blob = await new Promise<Blob>((res, rej) =>
         canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
       )
@@ -190,7 +191,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
           </button>
         </div>
 
-        {/* Receipt Card */}
+        {/* Receipt Card for Direct Downloads */}
         <div className="p-5">
           <div ref={receiptRef} className="receipt-card p-6 mx-auto" style={{ maxWidth: '480px' }}>
 
@@ -270,6 +271,153 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
             {/* Footer */}
             <div className="text-center mt-4">
               <p className="text-xs text-slate-600">{settings.footerText}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Social Media Large Card - Hidden for Capture */}
+        <div ref={socialMediaRef} style={{
+          position: 'fixed',
+          left: '-9999px',
+          top: '-9999px',
+          width: '1080px',
+          height: 'auto',
+          background: `linear-gradient(135deg, ${settings.primaryColor}10, ${settings.secondaryColor}10)`,
+          padding: '60px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{
+            width: '100%',
+            background: '#0f172a',
+            borderRadius: '32px',
+            padding: '50px',
+            border: `2px solid ${settings.primaryColor}40`,
+            boxShadow: `0 0 60px ${settings.primaryColor}20`
+          }}>
+            {/* Header */}
+            <div style={{ marginBottom: '40px', paddingBottom: '30px', borderBottom: `1px solid ${settings.primaryColor}30`, textAlign: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '20px' }}>
+                {settings.orgLogo ? (
+                  <img src={settings.orgLogo} alt="logo" style={{ width: '80px', height: '80px', borderRadius: '12px', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '12px',
+                    background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <span style={{ color: 'white', fontSize: '40px', fontWeight: 900 }}>S</span>
+                  </div>
+                )}
+              </div>
+              <h1 style={{ color: 'white', fontSize: '36px', fontWeight: 900, margin: '0 0 8px 0' }}>{settings.orgName}</h1>
+              <p style={{ color: '#60a5fa', fontSize: '14px', margin: 0 }}>نظام السجلات الذكي</p>
+            </div>
+
+            {/* Reference & Status */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', marginBottom: '40px', textAlign: 'center' }}>
+              <div>
+                <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 12px 0', fontWeight: 500 }}>رقم الإيصال</p>
+                <p style={{ color: '#60a5fa', fontSize: '28px', fontWeight: 900, fontFamily: 'monospace', margin: 0 }}>
+                  {record.reference_number}
+                </p>
+              </div>
+              <div>
+                <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 12px 0', fontWeight: 500 }}>الحالة</p>
+                <span style={{
+                  display: 'inline-block',
+                  padding: '8px 16px',
+                  borderRadius: '24px',
+                  border: `2px solid ${settings.primaryColor}`,
+                  color: settings.primaryColor,
+                  fontSize: '14px',
+                  fontWeight: 'bold'
+                }}>
+                  {record.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Details Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '25px', marginBottom: '40px' }}>
+              {[
+                { label: 'الاسم', value: record.name },
+                { label: 'رقم الهاتف', value: record.phone || '—' },
+                { label: 'التاريخ', value: formatDate(record.date) },
+                { label: 'الوقت', value: record.time || '—' },
+              ].map(({ label, value }) => (
+                <div key={label} style={{
+                  background: '#1e293b',
+                  borderRadius: '16px',
+                  padding: '20px',
+                  border: `1px solid ${settings.primaryColor}20`,
+                  textAlign: 'center'
+                }}>
+                  <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 10px 0', fontWeight: 500 }}>{label}</p>
+                  <p style={{ color: '#e2e8f0', fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Amount Section - Big & Bold */}
+            <div style={{
+              background: `linear-gradient(135deg, ${settings.primaryColor}20, ${settings.secondaryColor}20)`,
+              borderRadius: '20px',
+              padding: '40px 30px',
+              textAlign: 'center',
+              marginBottom: '40px',
+              border: `2px solid ${settings.primaryColor}30`
+            }}>
+              <p style={{ color: '#94a3b8', fontSize: '14px', margin: '0 0 15px 0', fontWeight: 500 }}>المبلغ الإجمالي</p>
+              <p style={{ color: settings.primaryColor, fontSize: '48px', fontWeight: 900, margin: 0 }}>
+                {formatCurrency(record.amount)}
+              </p>
+            </div>
+
+            {/* Notes */}
+            {record.notes && (
+              <div style={{
+                background: '#1e293b20',
+                borderRadius: '16px',
+                padding: '20px',
+                marginBottom: '40px',
+                border: `1px solid ${settings.primaryColor}20`,
+                textAlign: 'center'
+              }}>
+                <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 10px 0', fontWeight: 500 }}>ملاحظات</p>
+                <p style={{ color: '#cbd5e1', fontSize: '16px', margin: 0 }}>{record.notes}</p>
+              </div>
+            )}
+
+            {/* Footer with QR */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              paddingTop: '30px',
+              borderTop: `1px solid ${settings.primaryColor}30`
+            }}>
+              <div style={{ textAlign: 'left' }}>
+                <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0 0 8px 0', fontWeight: 500 }}>تاريخ الإنشاء</p>
+                <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>
+                  {new Date(record.created_at).toLocaleDateString('ar-EG', {
+                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                  })}
+                </p>
+              </div>
+              {qrUrl && (
+                <img src={qrUrl} alt="QR" style={{ width: '120px', height: '120px', background: 'white', borderRadius: '12px', padding: '10px' }} />
+              )}
+            </div>
+
+            {/* Company Footer */}
+            <div style={{ textAlign: 'center', marginTop: '30px' }}>
+              <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>{settings.footerText}</p>
             </div>
           </div>
         </div>
