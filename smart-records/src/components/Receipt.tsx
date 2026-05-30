@@ -65,7 +65,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const w = pdf.internal.pageSize.getWidth()
       const h = (canvas.height / canvas.width) * w
       pdf.addImage(imgData, 'PNG', 0, 0, w, h)
-      pdf.save(`mizo-mo-${record.reference_number}.pdf`)
+      pdf.save(`receipt-${record.reference_number}.pdf`)
       showToast('success', 'تم تنزيل الإيصال PDF بنجاح')
     } catch { showToast('error', 'فشل تنزيل الإيصال') }
   }
@@ -79,33 +79,85 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     win.onload = () => { win.print(); win.close() }
   }
 
-  const shareWhatsApp = () => {
-    const text = encodeURIComponent(`🧾 إيصال - ${settings.orgName}\n👤 الاسم: ${record.name}\n📞 الهاتف: ${record.phone}\n💰 المبلغ: ${formatCurrency(record.amount)}\n📅 التاريخ: ${formatDate(record.date)}\n🔖 المرجع: ${record.reference_number}\n📋 الحالة: ${record.status}`)
-    window.open(`https://wa.me/?text=${text}`, '_blank')
+  // تحويل الإيصال لملف صورة PNG
+  const getReceiptImageFile = async (): Promise<File> => {
+    const canvas = await captureCanvas()
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (!blob) return reject(new Error('Failed to create blob'))
+        resolve(new File([blob], `mizo-mo-${record.reference_number}.png`, { type: 'image/png' }))
+      }, 'image/png', 1.0)
+    })
   }
 
-  const shareTelegram = () => {
-    const text = encodeURIComponent(`🧾 إيصال - ${settings.orgName}\n👤 ${record.name} | 💰 ${formatCurrency(record.amount)}\n🔖 ${record.reference_number}`)
-    window.open(`https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${text}`, '_blank')
+  // تنزيل الصورة كبديل عند عدم دعم Web Share API
+  const downloadAndPrompt = async (appName: string) => {
+    const canvas = await captureCanvas()
+    const link = document.createElement('a')
+    link.download = `mizo-mo-${record.reference_number}.png`
+    link.href = canvas.toDataURL('image/png')
+    link.click()
+    showToast('info', `تم تنزيل صورة الإيصال — شاركها عبر ${appName} يدوياً`)
   }
 
-  const shareFacebook = () => {
-    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank')
+  const shareWhatsApp = async () => {
+    try {
+      const file = await getReceiptImageFile()
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
+      } else {
+        await downloadAndPrompt('واتساب')
+        setTimeout(() => window.open('https://wa.me/', '_blank'), 1200)
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('واتساب')
+    }
+  }
+
+  const shareTelegram = async () => {
+    try {
+      const file = await getReceiptImageFile()
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
+      } else {
+        await downloadAndPrompt('تيليجرام')
+        setTimeout(() => window.open('https://t.me/', '_blank'), 1200)
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('تيليجرام')
+    }
+  }
+
+  const shareFacebook = async () => {
+    try {
+      const file = await getReceiptImageFile()
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
+      } else {
+        await downloadAndPrompt('فيسبوك')
+        setTimeout(() => window.open('https://www.facebook.com/', '_blank'), 1200)
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('فيسبوك')
+    }
   }
 
   const shareGeneral = async () => {
     try {
-      const canvas = await captureCanvas()
-      canvas.toBlob(async blob => {
-        if (!blob) return
-        const file = new File([blob], `receipt-${record.reference_number}.png`, { type: 'image/png' })
-        if (navigator.share && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}`, text: `إيصال من ${settings.orgName}` })
-        } else {
-          showToast('info', 'المشاركة غير مدعومة في هذا المتصفح')
-        }
-      })
-    } catch { showToast('error', 'فشلت المشاركة') }
+      const file = await getReceiptImageFile()
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}`, text: `إيصال من ${settings.orgName}` })
+      } else {
+        const canvas = await captureCanvas()
+        const link = document.createElement('a')
+        link.download = `mizo-mo-${record.reference_number}.png`
+        link.href = canvas.toDataURL('image/png')
+        link.click()
+        showToast('info', 'تم تنزيل صورة الإيصال — المشاركة المباشرة غير مدعومة في هذا المتصفح')
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') showToast('error', 'فشلت المشاركة')
+    }
   }
 
   return (
