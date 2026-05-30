@@ -39,7 +39,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     try {
       const canvas = await captureCanvas()
       const link = document.createElement('a')
-      link.download = `mizi-mo-${record.reference_number}.png`
+      link.download = `mizo-mo-${record.reference_number}.png`
       link.href = canvas.toDataURL('image/png')
       link.click()
       showToast('success', 'تم تنزيل الإيصال PNG بنجاح')
