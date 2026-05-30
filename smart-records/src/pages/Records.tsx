@@ -288,7 +288,7 @@ const Records: React.FC = () => {
                 { label: 'الهاتف', value: viewRecord.phone || '—' },
                 { label: 'المبلغ', value: formatCurrency(Number(viewRecord.amount)) },
                 { label: 'التاريخ', value: viewRecord.date },
-                { label: 'الوقت', value: viewRecord.time || '—' },
+                {  label: 'الوقت',  value: viewRecord.time   ? new Date(`1970-01-01T${viewRecord.time}`).toLocaleTimeString('en-US', {    hour: 'numeric',    minute: '2-digit',    hour12: true    }) : '—'},
                 { label: 'الحالة', value: viewRecord.status },
                 { label: 'الرقم المرجعي', value: viewRecord.reference_number },
                 { label: 'ملاحظات', value: viewRecord.notes || '—' },
