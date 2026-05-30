@@ -111,7 +111,46 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     setBusy(false)
   }
 
-  // ---- المشاركة بصورة كاملة واضحة ----
+  // ---- فتح الواتساب مباشرة برابط + رسالة ----
+  const shareToWhatsApp = async () => {
+    if (busy) return
+    setBusy(true)
+    showToast('info', '⏳ جاري فتح الواتساب...')
+    
+    try {
+      // إنشاء رسالة مع معلومات الإيصال
+      const message = encodeURIComponent(
+        `🧾 إيصال جديد\n\n` +
+        `رقم الإيصال: ${record.reference_number}\n` +
+        `الاسم: ${record.name}\n` +
+        `المبلغ: ${formatCurrency(record.amount)}\n` +
+        `التاريخ: ${formatDate(record.date)}\n` +
+        `${record.phone ? `رقم الهاتف: ${record.phone}` : ''}`
+      )
+      
+      // فتح الواتساب مباشرة بدون تأخير
+      window.open(`https://wa.me/?text=${message}`, '_blank')
+      showToast('success', '✅ تم فتح الواتساب')
+      
+      // الآن نلتقط الصورة وننزلها في الخلفية
+      setTimeout(async () => {
+        try {
+          const canvas = await captureCanvas(socialMediaRef)
+          const filename = `${FILE_PREFIX}-${record.reference_number}.png`
+          triggerDownload(canvas.toDataURL('image/png'), filename)
+        } catch (e) {
+          console.log('صورة إضافية:', e)
+        }
+      }, 500)
+    } catch (e) {
+      console.log('Error:', e)
+      showToast('error', 'حدث خطأ')
+    }
+    
+    setBusy(false)
+  }
+
+  // ---- مشاركة إلى تطبيقات أخرى ----
   const shareToApp = async (appUrl: string, appName: string) => {
     if (busy) return
     setBusy(true)
@@ -445,7 +484,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
           <button onClick={print} disabled={busy}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all">
             <FiPrinter size={15} />
-            طباعة الإيصال
+            ط��اعة الإيصال
           </button>
 
           {/* Share */}
@@ -454,7 +493,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
             {busy && <span className="mr-2 text-blue-400 animate-pulse">⏳ جاري التجهيز...</span>}
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => shareToApp('https://wa.me/', 'واتساب')} disabled={busy}
+            <button onClick={shareToWhatsApp} disabled={busy}
               className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
               style={{ background: '#25d366' }}>
               <span>📱</span> واتساب
@@ -478,7 +517,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
           {/* Info note */}
           <p className="text-xs text-slate-600 text-center mt-3 leading-relaxed">
-            📌 على الموبايل: تُرسل الصورة مباشرة • على الكمبيوتر: تُنزَّل الصورة ثم يُفتح التطبيق
+            📌 واتساب: يفتح تلقائياً فوراً • التطبيقات الأخرى: تُنزَّل الصورة ثم يُفتح التطبيق
           </p>
         </div>
       </div>
