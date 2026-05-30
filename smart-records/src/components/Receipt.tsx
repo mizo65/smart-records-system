@@ -15,11 +15,84 @@ type Props = {
 
 const FILE_PREFIX = 'mizo-mo'
 
+// تعريف تطبيقات المشاركة
+const SHARE_APPS = [
+  {
+    id: 'whatsapp',
+    label: 'واتساب',
+    icon: '📱',
+    color: '#25d366',
+    needsPhone: true,
+    share: (phone: string, message: string) => {
+      const cleanPhone = phone.replace(/\D/g, '')
+      return `https://wa.me/${cleanPhone}?text=${message}`
+    }
+  },
+  {
+    id: 'telegram',
+    label: 'تيليجرام',
+    icon: '✈️',
+    color: '#0088cc',
+    needsPhone: true,
+    share: (phone: string, message: string) => {
+      return `https://t.me/${phone}?text=${message}`
+    }
+  },
+  {
+    id: 'sms',
+    label: 'رسالة نصية',
+    icon: '💬',
+    color: '#007AFF',
+    needsPhone: true,
+    share: (phone: string, message: string) => {
+      const cleanPhone = phone.replace(/\D/g, '')
+      return `sms:${cleanPhone}?body=${message}`
+    }
+  },
+  {
+    id: 'email',
+    label: 'بريد إلكتروني',
+    icon: '📧',
+    color: '#EA4335',
+    needsPhone: false,
+    share: (_: string, message: string) => {
+      return `mailto:?subject=إيصال&body=${message}`
+    }
+  },
+  {
+    id: 'facebook',
+    label: 'فيسبوك',
+    icon: '📘',
+    color: '#1877f2',
+    needsPhone: false,
+    share: () => 'https://www.facebook.com/'
+  },
+  {
+    id: 'instagram',
+    label: 'إنستجرام',
+    icon: '📸',
+    color: '#E4405F',
+    needsPhone: false,
+    share: () => 'https://www.instagram.com/'
+  },
+  {
+    id: 'twitter',
+    label: 'تويتر',
+    icon: '𝕏',
+    color: '#000000',
+    needsPhone: false,
+    share: () => 'https://www.twitter.com/'
+  },
+]
+
 const Receipt: React.FC<Props> = ({ record, onClose }) => {
   const receiptRef = useRef<HTMLDivElement>(null)
   const socialMediaRef = useRef<HTMLDivElement>(null)
   const [qrUrl, setQrUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [selectedApp, setSelectedApp] = useState<(typeof SHARE_APPS)[0] | null>(null)
+  const [phoneInput, setPhoneInput] = useState(record.phone || '')
   const { settings } = useSettings()
   const { showToast } = useToast()
 
@@ -104,29 +177,32 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const canvas = await captureCanvas(receiptRef)
       const win = window.open('', '_blank')
       if (!win) { showToast('error', 'يرجى السماح بالنوافذ المنبثقة'); setBusy(false); return }
-      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%}@media print{body{background:#fff}}</style></head><body><img src="${canvas.toDataURL('image/png')}"></body></html>`)
+      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}</style></head><body><img src="${canvas.toDataURL('image/png')}"></body></html>`)
       win.document.close()
       setTimeout(() => { win.focus(); win.print() }, 500)
     } catch { showToast('error', 'فشلت الطباعة') }
     setBusy(false)
   }
 
-  // ---- مشاركة مع رقم الهاتف ----
-  const shareToWhatsAppWithPhone = async (phoneNumber: string) => {
+  // ---- مشاركة مع تطبيق محدد ----
+  const shareWithApp = async (app: typeof SHARE_APPS[0]) => {
     if (busy) return
+    
+    // إذا كان التطبيق يحتاج رقم هاتف وليس لديه رقم
+    if (app.needsPhone && !phoneInput) {
+      showToast('error', 'يرجى إدخال رقم الهاتف أو المعرف')
+      return
+    }
+
     setBusy(true)
     showToast('info', '⏳ جاري تحضير الصورة...')
-    
+
     try {
       // التقاط الصورة
       const canvas = await captureCanvas(socialMediaRef)
-      
-      // تحويل الصورة إلى Blob
-      const blob = await new Promise<Blob>((res, rej) =>
-        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
-      )
+      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
 
-      // إنشاء رسالة
+      // إنشاء الرسالة
       const message = encodeURIComponent(
         `🧾 إيصال جديد\n\n` +
         `رقم الإيصال: ${record.reference_number}\n` +
@@ -135,10 +211,15 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
         `التاريخ: ${formatDate(record.date)}`
       )
 
-      // محاولة استخدام File Sharing API إذا كان متاحاً
+      // تحويل الصورة إلى Blob
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
+      )
+
+      // محاولة استخدام Web Share API (للموبايل)
       if (navigator.share) {
         try {
-          const file = new File([blob], `${FILE_PREFIX}-${record.reference_number}.png`, { type: 'image/png' })
+          const file = new File([blob], filename, { type: 'image/png' })
           if (navigator.canShare?.({ files: [file] })) {
             await navigator.share({
               files: [file],
@@ -146,6 +227,9 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
               text: message
             })
             showToast('success', '✅ تم مشاركة الإيصال')
+            setShareModalOpen(false)
+            setPhoneInput(record.phone || '')
+            setSelectedApp(null)
             setBusy(false)
             return
           }
@@ -154,90 +238,26 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
         }
       }
 
-      // إذا لم تنجح طريقة الـ Share API:
-      // حفظ الصورة محلياً + فتح واتساب برابط مباشر
-      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
+      // للكمبيوتر: حفظ الصورة وفتح التطبيق
       triggerDownload(canvas.toDataURL('image/png'), filename)
 
-      // بعد ثانية واحدة، افتح واتساب برقم الهاتف
       setTimeout(() => {
-        // صيغة رقم واتساب: من الأفضل استخدام الصيغة الدولية
-        const cleanPhone = phoneNumber.replace(/\D/g, '') // إزالة الأحرف غير الرقمية
-        const whatsappUrl = `https://wa.me/${cleanPhone}?text=${message}`
-        
-        window.open(whatsappUrl, '_blank')
-        showToast('success', '✅ تم حفظ الصورة وفتح الواتساب')
+        const shareUrl = app.share(phoneInput, message)
+        window.open(shareUrl, '_blank')
+        showToast('success', `✅ تم حفظ الصورة وفتح ${app.label}`)
+        setShareModalOpen(false)
+        setPhoneInput(record.phone || '')
+        setSelectedApp(null)
       }, 800)
     } catch (e) {
       console.error('Error:', e)
       showToast('error', 'حدث خطأ أثناء التحضير')
     }
-    
+
     setBusy(false)
   }
 
-  // ---- فتح الواتساب بدون رقم (عام) ----
-  const shareToWhatsApp = async () => {
-    if (busy) return
-    
-    // إذا كان هناك رقم هاتف في السجل، استخدمه
-    if (record.phone) {
-      shareToWhatsAppWithPhone(record.phone)
-      return
-    }
-
-    // وإلا اطلب من المستخدم إدخال الرقم
-    const phoneNumber = prompt('📱 أدخل رقم الهاتف (مثال: +201234567890):')
-    if (!phoneNumber) {
-      showToast('error', 'لم يتم إدخال رقم الهاتف')
-      return
-    }
-
-    shareToWhatsAppWithPhone(phoneNumber)
-  }
-
-  // ---- مشاركة إلى تطبيقات أخرى ----
-  const shareToApp = async (appUrl: string, appName: string) => {
-    if (busy) return
-    setBusy(true)
-    showToast('info', `⏳ جاري تجهيز صورة الإيصال...`)
-    try {
-      const canvas = await captureCanvas(socialMediaRef)
-      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
-
-      // إنشاء الـ Blob من الصورة
-      const blob = await new Promise<Blob>((res, rej) =>
-        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
-      )
-
-      // محاولة استخدام Web Share API (موبايل)
-      if (navigator.share) {
-        try {
-          const file = new File([blob], filename, { type: 'image/png' })
-          if (navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}` })
-            showToast('success', '✅ تم مشاركة صورة الإيصال')
-            setBusy(false)
-            return
-          }
-        } catch (e) {
-          console.log('Share API error:', e)
-        }
-      }
-
-      // كمبيوتر: نزّل الصورة وافتح التطبيق
-      triggerDownload(canvas.toDataURL('image/png'), filename)
-      showToast('success', `✅ تم حفظ الصورة — جاري فتح ${appName}...`)
-      setTimeout(() => window.open(appUrl, '_blank'), 1200)
-    } catch (e: unknown) {
-      if (!(e instanceof Error && e.name === 'AbortError')) {
-        showToast('error', 'حدث خطأ أثناء التجهيز')
-      }
-    }
-    setBusy(false)
-  }
-
-  // ---- مشاركة عامة ----
+  // ---- مشاركة عامة (العامة/الافتراضية) ----
   const shareGeneral = async () => {
     if (busy) return
     setBusy(true)
@@ -539,20 +559,10 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
             {busy && <span className="mr-2 text-blue-400 animate-pulse">⏳ جاري التجهيز...</span>}
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={shareToWhatsApp} disabled={busy}
-              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
-              style={{ background: '#25d366' }}>
-              <span>📱</span> واتساب
-            </button>
-            <button onClick={() => shareToApp('https://t.me/', 'تيليجرام')} disabled={busy}
-              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
-              style={{ background: '#0088cc' }}>
-              <span>✈️</span> تيليجرام
-            </button>
-            <button onClick={() => shareToApp('https://www.facebook.com/', 'فيسبوك')} disabled={busy}
-              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
-              style={{ background: '#1877f2' }}>
-              <span>📘</span> فيسبوك
+            <button onClick={() => setShareModalOpen(true)} disabled={busy}
+              className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold text-sm transition-all hover:scale-[1.02] disabled:opacity-60">
+              <FiShare2 size={15} />
+              اختر تطبيق للمشاركة 📲
             </button>
             <button onClick={shareGeneral} disabled={busy}
               className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all">
@@ -563,10 +573,105 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
           {/* Info note */}
           <p className="text-xs text-slate-600 text-center mt-3 leading-relaxed">
-            📌 واتساب: يحفظ الصورة ويفتح الدردشة مع الشخص المحدد • التطبيقات الأخرى: تُنزَّل الصورة ثم يُفتح التطبيق
+            📌 اختر التطبيق: يحفظ الصورة ويفتح التطبيق • المشاركة العامة: تستخدم Web Share API إن توفرت
           </p>
         </div>
       </div>
+
+      {/* Share Apps Modal */}
+      {shareModalOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50">
+          <div className="glass rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b border-white/5 sticky top-0 bg-slate-900/50 backdrop-blur">
+              <h3 className="text-lg font-bold text-white">اختر تطبيق المشاركة</h3>
+              <button
+                onClick={() => {
+                  setShareModalOpen(false)
+                  setSelectedApp(null)
+                  setPhoneInput(record.phone || '')
+                }}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <FiX size={20} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5">
+              {!selectedApp ? (
+                <>
+                  {/* App Selection Grid */}
+                  <div className="grid grid-cols-2 gap-3 mb-6">
+                    {SHARE_APPS.map(app => (
+                      <button
+                        key={app.id}
+                        onClick={() => setSelectedApp(app)}
+                        className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border border-white/10 hover:border-white/30 hover:bg-white/5 transition-all"
+                      >
+                        <span className="text-3xl">{app.icon}</span>
+                        <span className="text-sm font-semibold text-slate-300">{app.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Phone/ID Input Screen */}
+                  <div className="mb-5">
+                    <div className="flex items-center gap-3 mb-4">
+                      <button
+                        onClick={() => setSelectedApp(null)}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <span>←</span>
+                      </button>
+                      <span className="text-2xl">{selectedApp.icon}</span>
+                      <h4 className="text-lg font-bold text-white">{selectedApp.label}</h4>
+                    </div>
+
+                    {selectedApp.needsPhone && (
+                      <div className="mb-4">
+                        <label className="block text-sm text-slate-400 mb-2">
+                          {selectedApp.id === 'email' ? 'البريد الإلكتروني' : 'رقم الهاتف / المعرف'}
+                        </label>
+                        <input
+                          type="text"
+                          value={phoneInput}
+                          onChange={(e) => setPhoneInput(e.target.value)}
+                          placeholder={
+                            selectedApp.id === 'sms' ? '+20123456789' :
+                              selectedApp.id === 'email' ? 'example@email.com' :
+                                selectedApp.id === 'telegram' ? 'username أو +201234567890' :
+                                  '+20123456789'
+                          }
+                          className="w-full px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => shareWithApp(selectedApp)}
+                      disabled={busy || (selectedApp.needsPhone && !phoneInput)}
+                      className="w-full px-4 py-2.5 rounded-lg font-semibold text-white transition-all disabled:opacity-60"
+                      style={{ background: selectedApp.color }}
+                    >
+                      {busy ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <FiLoader size={15} className="animate-spin" />
+                          جاري التحضير...
+                        </span>
+                      ) : (
+                        `إرسال عبر ${selectedApp.label}`
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
