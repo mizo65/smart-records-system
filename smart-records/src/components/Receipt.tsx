@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { FiDownload, FiPrinter, FiShare2, FiX } from 'react-icons/fi'
+import { FiDownload, FiPrinter, FiShare2, FiX, FiLoader } from 'react-icons/fi'
 import QRCode from 'qrcode'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
@@ -13,9 +13,12 @@ type Props = {
   onClose: () => void
 }
 
+const FILE_PREFIX = 'mizo-mo'
+
 const Receipt: React.FC<Props> = ({ record, onClose }) => {
   const receiptRef = useRef<HTMLDivElement>(null)
   const [qrUrl, setQrUrl] = useState('')
+  const [busy, setBusy] = useState(false)
   const { settings } = useSettings()
   const { showToast } = useToast()
 
@@ -25,39 +28,58 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       .then(setQrUrl)
   }, [record])
 
+  // التقاط صورة الإيصال بجودة عالية
   const captureCanvas = async (): Promise<HTMLCanvasElement> => {
     if (!receiptRef.current) throw new Error('No receipt ref')
     return await html2canvas(receiptRef.current, {
       scale: 3,
       useCORS: true,
+      allowTaint: true,
       backgroundColor: '#0f172a',
       logging: false,
+      imageTimeout: 0,
     })
   }
 
+  // تنزيل الصورة مباشرة بدون أي قيود
+  const triggerDownload = (dataUrl: string, filename: string) => {
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = filename
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => document.body.removeChild(a), 300)
+  }
+
+  // ---- تنزيل PNG ----
   const downloadPNG = async () => {
+    if (busy) return
+    setBusy(true)
     try {
       const canvas = await captureCanvas()
-      const link = document.createElement('a')
-      link.download = `mizo-mo-${record.reference_number}.png`
-      link.href = canvas.toDataURL('image/png')
-      link.click()
-      showToast('success', 'تم تنزيل الإيصال PNG بنجاح')
-    } catch { showToast('error', 'فشل تنزيل الإيصال') }
+      triggerDownload(canvas.toDataURL('image/png'), `${FILE_PREFIX}-receipt-${record.reference_number}.png`)
+      showToast('success', '✅ تم تنزيل الإيصال PNG')
+    } catch { showToast('error', 'فشل تنزيل PNG') }
+    setBusy(false)
   }
 
+  // ---- تنزيل JPG ----
   const downloadJPG = async () => {
+    if (busy) return
+    setBusy(true)
     try {
       const canvas = await captureCanvas()
-      const link = document.createElement('a')
-      link.download = `mizo-mo-${record.reference_number}.jpg`
-      link.href = canvas.toDataURL('image/jpeg', 0.95)
-      link.click()
-      showToast('success', 'تم تنزيل الإيصال JPG بنجاح')
-    } catch { showToast('error', 'فشل تنزيل الإيصال') }
+      triggerDownload(canvas.toDataURL('image/jpeg', 0.95), `${FILE_PREFIX}-receipt-${record.reference_number}.jpg`)
+      showToast('success', '✅ تم تنزيل الإيصال JPG')
+    } catch { showToast('error', 'فشل تنزيل JPG') }
+    setBusy(false)
   }
 
+  // ---- تنزيل PDF ----
   const downloadPDF = async () => {
+    if (busy) return
+    setBusy(true)
     try {
       const canvas = await captureCanvas()
       const imgData = canvas.toDataURL('image/png')
@@ -65,69 +87,91 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const w = pdf.internal.pageSize.getWidth()
       const h = (canvas.height / canvas.width) * w
       pdf.addImage(imgData, 'PNG', 0, 0, w, h)
-      pdf.save(`mizo-mo-${record.reference_number}.pdf`)
-      showToast('success', 'تم تنزيل الإيصال PDF بنجاح')
-    } catch { showToast('error', 'فشل تنزيل الإيصال') }
+      pdf.save(`${FILE_PREFIX}-receipt-${record.reference_number}.pdf`)
+      showToast('success', '✅ تم تنزيل الإيصال PDF')
+    } catch { showToast('error', 'فشل تنزيل PDF') }
+    setBusy(false)
   }
 
+  // ---- طباعة ----
   const print = async () => {
-    const canvas = await captureCanvas()
-    const win = window.open('', '_blank')
-    if (!win) return
-    win.document.write(`<html><head><title>Receipt</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%}</style></head><body><img src="${canvas.toDataURL()}"/></body></html>`)
-    win.document.close()
-    win.onload = () => { win.print(); win.close() }
+    if (busy) return
+    setBusy(true)
+    try {
+      const canvas = await captureCanvas()
+      const win = window.open('', '_blank')
+      if (!win) { showToast('error', 'يرجى السماح بالنوافذ المنبثقة'); setBusy(false); return }
+      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}@media print{body{background:#fff}}</style></head><body><img src="${canvas.toDataURL('image/png')}"/></body></html>`)
+      win.document.close()
+      setTimeout(() => { win.focus(); win.print() }, 500)
+    } catch { showToast('error', 'فشلت الطباعة') }
+    setBusy(false)
   }
 
-  // دالة مشتركة: تنزيل صورة الإيصال دائماً ثم فتح التطبيق
-  const shareAsImage = async (appUrl?: string, appName?: string) => {
+  // ---- المشاركة: ينزّل الصورة دائماً ثم يفتح التطبيق ----
+  const shareToApp = async (appUrl: string, appName: string) => {
+    if (busy) return
+    setBusy(true)
+    showToast('info', `⏳ جاري تجهيز صورة الإيصال...`)
     try {
-      showToast('info', 'جاري تجهيز صورة الإيصال...')
       const canvas = await captureCanvas()
+      const filename = `${FILE_PREFIX}-receipt-${record.reference_number}.png`
 
-      // على الموبايل: جرب Web Share API أولاً
+      // موبايل: Web Share API مع الصورة مباشرة
       const blob = await new Promise<Blob>((res, rej) =>
-        canvas.toBlob(b => b ? res(b) : rej(new Error('blob failed')), 'image/png', 1.0)
+        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
       )
-      const file = new File([blob], `mizo-mo-${record.reference_number}.png`, { type: 'image/png' })
+      const file = new File([blob], filename, { type: 'image/png' })
 
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `إيصال - ${settings.orgName}`,
-          text: `🧾 إيصال رقم: ${record.reference_number}`,
-        })
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}` })
+        setBusy(false)
         return
       }
 
-      // fallback: تنزيل الصورة مباشرة بدون نص
-      const link = document.createElement('a')
-      link.download = `mizo-mo-${record.reference_number}.png`
-      link.href = canvas.toDataURL('image/png')
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      if (appUrl) {
-        showToast('success', `✅ تم تنزيل صورة الإيصال — افتح ${appName ?? ''} وأرسلها`)
-        setTimeout(() => window.open(appUrl, '_blank'), 800)
-      } else {
-        showToast('success', '✅ تم تنزيل صورة الإيصال بنجاح')
-      }
+      // كمبيوتر أو متصفح لا يدعم: نزّل الصورة وافتح التطبيق
+      triggerDownload(canvas.toDataURL('image/png'), filename)
+      showToast('success', `✅ تم تنزيل صورة الإيصال — أرسلها عبر ${appName}`)
+      setTimeout(() => window.open(appUrl, '_blank'), 900)
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') return
-      showToast('error', 'فشل تجهيز الصورة')
+      if (!(e instanceof Error && e.name === 'AbortError')) {
+        showToast('error', 'حدث خطأ أثناء التجهيز')
+      }
     }
+    setBusy(false)
   }
 
-  const shareWhatsApp  = () => shareAsImage('https://wa.me/', 'واتساب')
-  const shareTelegram  = () => shareAsImage('https://t.me/', 'تيليجرام')
-  const shareFacebook  = () => shareAsImage('https://www.facebook.com/', 'فيسبوك')
-  const shareGeneral   = () => shareAsImage()
+  // ---- مشاركة عامة ----
+  const shareGeneral = async () => {
+    if (busy) return
+    setBusy(true)
+    showToast('info', '⏳ جاري تجهيز صورة الإيصال...')
+    try {
+      const canvas = await captureCanvas()
+      const filename = `${FILE_PREFIX}-receipt-${record.reference_number}.png`
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
+      )
+      const file = new File([blob], filename, { type: 'image/png' })
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}` })
+      } else {
+        triggerDownload(canvas.toDataURL('image/png'), filename)
+        showToast('success', '✅ تم تنزيل صورة الإيصال')
+      }
+    } catch (e: unknown) {
+      if (!(e instanceof Error && e.name === 'AbortError')) {
+        showToast('error', 'حدث خطأ')
+      }
+    }
+    setBusy(false)
+  }
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 modal-overlay">
       <div className="glass rounded-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto animate-slide-up">
+
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-white/5">
           <h2 className="text-lg font-bold text-white">الإيصال</h2>
@@ -138,14 +182,16 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
         {/* Receipt Card */}
         <div className="p-5">
-          <div ref={receiptRef} className="mizo-mo-card p-6 mx-auto" style={{ maxWidth: '480px' }}>
-            {/* Header */}
+          <div ref={receiptRef} className="receipt-card p-6 mx-auto" style={{ maxWidth: '480px' }}>
+
+            {/* Card Header */}
             <div className="flex items-center justify-between mb-6 pb-5 border-b border-blue-800/40">
               <div>
                 {settings.orgLogo ? (
                   <img src={settings.orgLogo} alt="logo" className="w-14 h-14 rounded-xl object-cover mb-2" />
                 ) : (
-                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-2" style={{ background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})` }}>
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-2"
+                    style={{ background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})` }}>
                     <span className="text-white text-2xl font-black">S</span>
                   </div>
                 )}
@@ -156,7 +202,9 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
                 <div className="text-xs text-slate-500 mb-1">رقم الإيصال</div>
                 <div className="text-sm font-mono font-bold text-blue-400">{record.reference_number}</div>
                 <div className="text-xs text-slate-500 mt-2">الحالة</div>
-                <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${getStatusColor(record.status)}`}>{record.status}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${getStatusColor(record.status)}`}>
+                  {record.status}
+                </span>
               </div>
             </div>
 
@@ -176,9 +224,12 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
             </div>
 
             {/* Amount */}
-            <div className="rounded-xl p-4 mb-5 text-center" style={{ background: `linear-gradient(135deg, ${settings.primaryColor}20, ${settings.secondaryColor}20)`, border: `1px solid ${settings.primaryColor}30` }}>
+            <div className="rounded-xl p-4 mb-5 text-center"
+              style={{ background: `linear-gradient(135deg, ${settings.primaryColor}20, ${settings.secondaryColor}20)`, border: `1px solid ${settings.primaryColor}30` }}>
               <div className="text-xs text-slate-400 mb-1">المبلغ الإجمالي</div>
-              <div className="text-3xl font-black" style={{ color: settings.primaryColor }}>{formatCurrency(record.amount)}</div>
+              <div className="text-3xl font-black" style={{ color: settings.primaryColor }}>
+                {formatCurrency(record.amount)}
+              </div>
             </div>
 
             {/* Notes */}
@@ -189,11 +240,15 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
               </div>
             )}
 
-            {/* QR + Footer */}
+            {/* QR + Date */}
             <div className="flex items-end justify-between pt-5 border-t border-blue-800/40">
               <div>
                 <div className="text-xs text-slate-500 mb-1">تاريخ الإنشاء</div>
-                <div className="text-xs text-slate-400">{new Date(record.created_at).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                <div className="text-xs text-slate-400">
+                  {new Date(record.created_at).toLocaleDateString('ar-EG', {
+                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                  })}
+                </div>
               </div>
               {qrUrl && (
                 <div className="bg-white rounded-lg p-2">
@@ -202,7 +257,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
               )}
             </div>
 
-            {/* Watermark */}
+            {/* Footer */}
             <div className="text-center mt-4">
               <p className="text-xs text-slate-600">{settings.footerText}</p>
             </div>
@@ -211,6 +266,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
         {/* Action Buttons */}
         <div className="p-5 border-t border-white/5">
+
           {/* Download */}
           <p className="text-xs text-slate-500 mb-3 font-semibold">تنزيل الإيصال</p>
           <div className="grid grid-cols-3 gap-2 mb-4">
@@ -219,7 +275,8 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
               { label: 'JPG', action: downloadJPG, color: 'from-violet-600 to-violet-700' },
               { label: 'PDF', action: downloadPDF, color: 'from-red-600 to-red-700' },
             ].map(btn => (
-              <button key={btn.label} onClick={btn.action} className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-white font-semibold text-sm transition-all hover:scale-[1.02] bg-gradient-to-r ${btn.color}`}>
+              <button key={btn.label} onClick={btn.action} disabled={busy}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-white font-semibold text-sm transition-all hover:scale-[1.02] disabled:opacity-60 bg-gradient-to-r ${btn.color}`}>
                 <FiDownload size={15} />
                 {btn.label}
               </button>
@@ -227,28 +284,44 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
           </div>
 
           {/* Print */}
-          <button onClick={print} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700 mb-4">
+          <button onClick={print} disabled={busy}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700 disabled:opacity-60 mb-4">
             <FiPrinter size={15} />
             طباعة الإيصال
           </button>
 
           {/* Share */}
-          <p className="text-xs text-slate-500 mb-3 font-semibold">مشاركة</p>
+          <p className="text-xs text-slate-500 mb-3 font-semibold">
+            مشاركة الإيصال كصورة
+            {busy && <span className="mr-2 text-blue-400 animate-pulse">⏳ جاري التجهيز...</span>}
+          </p>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={shareWhatsApp} className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02]" style={{ background: '#25d366' }}>
+            <button onClick={() => shareToApp('https://wa.me/', 'واتساب')} disabled={busy}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
+              style={{ background: '#25d366' }}>
               <span>📱</span> واتساب
             </button>
-            <button onClick={shareTelegram} className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02]" style={{ background: '#0088cc' }}>
+            <button onClick={() => shareToApp('https://t.me/', 'تيليجرام')} disabled={busy}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
+              style={{ background: '#0088cc' }}>
               <span>✈️</span> تيليجرام
             </button>
-            <button onClick={shareFacebook} className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02]" style={{ background: '#1877f2' }}>
+            <button onClick={() => shareToApp('https://www.facebook.com/', 'فيسبوك')} disabled={busy}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-[1.02] disabled:opacity-60"
+              style={{ background: '#1877f2' }}>
               <span>📘</span> فيسبوك
             </button>
-            <button onClick={shareGeneral} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700">
+            <button onClick={shareGeneral} disabled={busy}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700 disabled:opacity-60">
               <FiShare2 size={15} />
               مشاركة عامة
             </button>
           </div>
+
+          {/* Info note */}
+          <p className="text-xs text-slate-600 text-center mt-3 leading-relaxed">
+            📌 على الموبايل: تُرسل الصورة مباشرة • على الكمبيوتر: تُنزَّل الصورة ثم يُفتح التطبيق
+          </p>
         </div>
       </div>
     </div>
@@ -256,4 +329,3 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 }
 
 export default Receipt
-.
