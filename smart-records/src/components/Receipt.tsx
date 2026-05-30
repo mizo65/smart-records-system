@@ -101,7 +101,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const canvas = await captureCanvas()
       const win = window.open('', '_blank')
       if (!win) { showToast('error', 'يرجى السماح بالنوافذ المنبثقة'); setBusy(false); return }
-      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}@media print{body{background:#fff}}</style></head><body><img src="${canvas.toDataURL('image/png')}"/></body></html>`)
+      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}</style></head><body><img src="${canvas.toDataURL('image/png')}" /></body></html>`)
       win.document.close()
       setTimeout(() => { win.focus(); win.print() }, 500)
     } catch { showToast('error', 'فشلت الطباعة') }
@@ -117,22 +117,32 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const canvas = await captureCanvas()
       const filename = `${FILE_PREFIX}-receipt-${record.reference_number}.png`
 
-      // موبايل: Web Share API مع الصورة مباشرة
+      // 1️⃣ إنشاء الـ Blob من الصورة
       const blob = await new Promise<Blob>((res, rej) =>
         canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
       )
-      const file = new File([blob], filename, { type: 'image/png' })
 
-      if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}` })
-        setBusy(false)
-        return
+      // 2️⃣ محاولة استخدام Web Share API (موبايل)
+      if (navigator.share) {
+        try {
+          const file = new File([blob], filename, { type: 'image/png' })
+          if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}` })
+            showToast('success', '✅ تم مشاركة صورة الإيصال')
+            setBusy(false)
+            return
+          }
+        } catch (e) {
+          console.log('Share API error:', e)
+        }
       }
 
-      // كمبيوتر أو متصفح لا يدعم: نزّل الصورة وافتح التطبيق
+      // 3️⃣ كمبيوتر: نزّل الصورة وافتح التطبيق
       triggerDownload(canvas.toDataURL('image/png'), filename)
-      showToast('success', `✅ تم تنزيل صورة الإيصال — أرسلها عبر ${appName}`)
-      setTimeout(() => window.open(appUrl, '_blank'), 900)
+      showToast('success', `✅ تم حفظ الصورة — جاري فتح ${appName}...`)
+      
+      // افتح التطبيق بعد تحميل الصورة
+      setTimeout(() => window.open(appUrl, '_blank'), 1200)
     } catch (e: unknown) {
       if (!(e instanceof Error && e.name === 'AbortError')) {
         showToast('error', 'حدث خطأ أثناء التجهيز')
@@ -285,13 +295,13 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
           {/* Print */}
           <button onClick={print} disabled={busy}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700 disabled:opacity-60 mb-4">
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all">
             <FiPrinter size={15} />
             طباعة الإيصال
           </button>
 
           {/* Share */}
-          <p className="text-xs text-slate-500 mb-3 font-semibold">
+          <p className="text-xs text-slate-500 mb-3 font-semibold mt-4">
             مشاركة الإيصال كصورة
             {busy && <span className="mr-2 text-blue-400 animate-pulse">⏳ جاري التجهيز...</span>}
           </p>
@@ -312,7 +322,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
               <span>📘</span> فيسبوك
             </button>
             <button onClick={shareGeneral} disabled={busy}
-              className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all hover:bg-slate-700 disabled:opacity-60">
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all">
               <FiShare2 size={15} />
               مشاركة عامة
             </button>
