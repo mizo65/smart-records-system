@@ -224,7 +224,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
                 { label: 'الاسم', value: record.name },
                 { label: 'رقم الهاتف', value: record.phone || '—' },
                 { label: 'التاريخ', value: formatDate(record.date) },
-                { label: 'الوقت', value: record.time || '—' },
+                { label: 'الوقت', value: {  record.time   ? new Date(`1970-01-01T${record.time}`).toLocaleTimeString('en-US',   hour: 'numeric', minute: '2-digit',hour12: true})  : '—'}
               ].map(({ label, value }) => (
                 <div key={label} className="bg-slate-800/50 rounded-xl p-3">
                   <div className="text-xs text-slate-500 mb-1">{label}</div>
