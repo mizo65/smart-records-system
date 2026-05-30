@@ -104,50 +104,96 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const canvas = await captureCanvas(receiptRef)
       const win = window.open('', '_blank')
       if (!win) { showToast('error', 'يرجى السماح بالنوافذ المنبثقة'); setBusy(false); return }
-      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%;height:auto}</style></head><body><img src="${canvas.toDataURL('image/png')}"/></body></html>`)
+      win.document.write(`<html><head><title>إيصال</title><style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000}img{max-width:100%}@media print{body{background:#fff}}</style></head><body><img src="${canvas.toDataURL('image/png')}"></body></html>`)
       win.document.close()
       setTimeout(() => { win.focus(); win.print() }, 500)
     } catch { showToast('error', 'فشلت الطباعة') }
     setBusy(false)
   }
 
-  // ---- فتح الواتساب مباشرة برابط + رسالة ----
-  const shareToWhatsApp = async () => {
+  // ---- مشاركة مع رقم الهاتف ----
+  const shareToWhatsAppWithPhone = async (phoneNumber: string) => {
     if (busy) return
     setBusy(true)
-    showToast('info', '⏳ جاري فتح الواتساب...')
+    showToast('info', '⏳ جاري تحضير الصورة...')
     
     try {
-      // إنشاء رسالة مع معلومات الإيصال
+      // التقاط الصورة
+      const canvas = await captureCanvas(socialMediaRef)
+      
+      // تحويل الصورة إلى Blob
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(b => b ? res(b) : rej(), 'image/png', 1.0)
+      )
+
+      // إنشاء رسالة
       const message = encodeURIComponent(
         `🧾 إيصال جديد\n\n` +
         `رقم الإيصال: ${record.reference_number}\n` +
         `الاسم: ${record.name}\n` +
         `المبلغ: ${formatCurrency(record.amount)}\n` +
-        `التاريخ: ${formatDate(record.date)}\n` +
-        `${record.phone ? `رقم الهاتف: ${record.phone}` : ''}`
+        `التاريخ: ${formatDate(record.date)}`
       )
-      
-      // فتح الواتساب مباشرة بدون تأخير
-      window.open(`https://wa.me/?text=${message}`, '_blank')
-      showToast('success', '✅ تم فتح الواتساب')
-      
-      // الآن نلتقط الصورة وننزلها في الخلفية
-      setTimeout(async () => {
+
+      // محاولة استخدام File Sharing API إذا كان متاحاً
+      if (navigator.share) {
         try {
-          const canvas = await captureCanvas(socialMediaRef)
-          const filename = `${FILE_PREFIX}-${record.reference_number}.png`
-          triggerDownload(canvas.toDataURL('image/png'), filename)
+          const file = new File([blob], `${FILE_PREFIX}-${record.reference_number}.png`, { type: 'image/png' })
+          if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `إيصال - ${record.reference_number}`,
+              text: message
+            })
+            showToast('success', '✅ تم مشاركة الإيصال')
+            setBusy(false)
+            return
+          }
         } catch (e) {
-          console.log('صورة إضافية:', e)
+          console.log('Share API:', e)
         }
-      }, 500)
+      }
+
+      // إذا لم تنجح طريقة الـ Share API:
+      // حفظ الصورة محلياً + فتح واتساب برابط مباشر
+      const filename = `${FILE_PREFIX}-${record.reference_number}.png`
+      triggerDownload(canvas.toDataURL('image/png'), filename)
+
+      // بعد ثانية واحدة، افتح واتساب برقم الهاتف
+      setTimeout(() => {
+        // صيغة رقم واتساب: من الأفضل استخدام الصيغة الدولية
+        const cleanPhone = phoneNumber.replace(/\D/g, '') // إزالة الأحرف غير الرقمية
+        const whatsappUrl = `https://wa.me/${cleanPhone}?text=${message}`
+        
+        window.open(whatsappUrl, '_blank')
+        showToast('success', '✅ تم حفظ الصورة وفتح الواتساب')
+      }, 800)
     } catch (e) {
-      console.log('Error:', e)
-      showToast('error', 'حدث خطأ')
+      console.error('Error:', e)
+      showToast('error', 'حدث خطأ أثناء التحضير')
     }
     
     setBusy(false)
+  }
+
+  // ---- فتح الواتساب بدون رقم (عام) ----
+  const shareToWhatsApp = async () => {
+    if (busy) return
+    
+    // إذا كان هناك رقم هاتف في السجل، استخدمه
+    if (record.phone) {
+      shareToWhatsAppWithPhone(record.phone)
+      return
+    }
+
+    // وإلا اطلب من المستخدم إدخال الرقم
+    const phoneNumber = prompt('📱 أدخل رقم الهاتف (مثال: +201234567890):')
+    if (!phoneNumber) {
+      showToast('error', 'لم يتم إدخال رقم الهاتف')
+      return
+    }
+
+    shareToWhatsAppWithPhone(phoneNumber)
   }
 
   // ---- مشاركة إلى تطبيقات أخرى ----
@@ -484,7 +530,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
           <button onClick={print} disabled={busy}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-slate-300 hover:text-white font-semibold text-sm transition-all">
             <FiPrinter size={15} />
-            ط��اعة الإيصال
+            طباعة الإيصال
           </button>
 
           {/* Share */}
@@ -517,7 +563,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
           {/* Info note */}
           <p className="text-xs text-slate-600 text-center mt-3 leading-relaxed">
-            📌 واتساب: يفتح تلقائياً فوراً • التطبيقات الأخرى: تُنزَّل الصورة ثم يُفتح التطبيق
+            📌 واتساب: يحفظ الصورة ويفتح الدردشة مع الشخص المحدد • التطبيقات الأخرى: تُنزَّل الصورة ثم يُفتح التطبيق
           </p>
         </div>
       </div>
