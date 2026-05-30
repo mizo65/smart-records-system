@@ -65,7 +65,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const w = pdf.internal.pageSize.getWidth()
       const h = (canvas.height / canvas.width) * w
       pdf.addImage(imgData, 'PNG', 0, 0, w, h)
-      pdf.save(`receipt-${record.reference_number}.pdf`)
+      pdf.save(`mizo-mo-${record.reference_number}.pdf`)
       showToast('success', 'تم تنزيل الإيصال PDF بنجاح')
     } catch { showToast('error', 'فشل تنزيل الإيصال') }
   }
@@ -79,86 +79,51 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     win.onload = () => { win.print(); win.close() }
   }
 
-  // تحويل الإيصال لملف صورة PNG
-  const getReceiptImageFile = async (): Promise<File> => {
-    const canvas = await captureCanvas()
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(blob => {
-        if (!blob) return reject(new Error('Failed to create blob'))
-        resolve(new File([blob], `mizo-mo-${record.reference_number}.png`, { type: 'image/png' }))
-      }, 'image/png', 1.0)
-    })
-  }
-
-  // تنزيل الصورة كبديل عند عدم دعم Web Share API
-  const downloadAndPrompt = async (appName: string) => {
-    const canvas = await captureCanvas()
-    const link = document.createElement('a')
-    link.download = `mizo-mo-${record.reference_number}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
-    showToast('info', `تم تنزيل صورة الإيصال — شاركها عبر ${appName} يدوياً`)
-  }
-
-  const shareWhatsApp = async () => {
+  // دالة مشتركة: تنزيل صورة الإيصال دائماً ثم فتح التطبيق
+  const shareAsImage = async (appUrl?: string, appName?: string) => {
     try {
-      const file = await getReceiptImageFile()
+      showToast('info', 'جاري تجهيز صورة الإيصال...')
+      const canvas = await captureCanvas()
+
+      // على الموبايل: جرب Web Share API أولاً
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(b => b ? res(b) : rej(new Error('blob failed')), 'image/png', 1.0)
+      )
+      const file = new File([blob], `mizo-mo-${record.reference_number}.png`, { type: 'image/png' })
+
       if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
+        await navigator.share({
+          files: [file],
+          title: `إيصال - ${settings.orgName}`,
+          text: `🧾 إيصال رقم: ${record.reference_number}`,
+        })
+        return
+      }
+
+      // fallback: تنزيل الصورة مباشرة بدون نص
+      const link = document.createElement('a')
+      link.download = `mizo-mo-${record.reference_number}.png`
+      link.href = canvas.toDataURL('image/png')
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+      if (appUrl) {
+        showToast('success', `✅ تم تنزيل صورة الإيصال — افتح ${appName ?? ''} وأرسلها`)
+        setTimeout(() => window.open(appUrl, '_blank'), 800)
       } else {
-        await downloadAndPrompt('واتساب')
-        setTimeout(() => window.open('https://wa.me/', '_blank'), 1200)
+        showToast('success', '✅ تم تنزيل صورة الإيصال بنجاح')
       }
     } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('واتساب')
+      if (e instanceof Error && e.name === 'AbortError') return
+      showToast('error', 'فشل تجهيز الصورة')
     }
   }
 
-  const shareTelegram = async () => {
-    try {
-      const file = await getReceiptImageFile()
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
-      } else {
-        await downloadAndPrompt('تيليجرام')
-        setTimeout(() => window.open('https://t.me/', '_blank'), 1200)
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('تيليجرام')
-    }
-  }
-
-  const shareFacebook = async () => {
-    try {
-      const file = await getReceiptImageFile()
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `إيصال - ${settings.orgName}`, text: `🧾 إيصال رقم: ${record.reference_number}` })
-      } else {
-        await downloadAndPrompt('فيسبوك')
-        setTimeout(() => window.open('https://www.facebook.com/', '_blank'), 1200)
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') await downloadAndPrompt('فيسبوك')
-    }
-  }
-
-  const shareGeneral = async () => {
-    try {
-      const file = await getReceiptImageFile()
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `إيصال - ${record.reference_number}`, text: `إيصال من ${settings.orgName}` })
-      } else {
-        const canvas = await captureCanvas()
-        const link = document.createElement('a')
-        link.download = `mizo-mo-${record.reference_number}.png`
-        link.href = canvas.toDataURL('image/png')
-        link.click()
-        showToast('info', 'تم تنزيل صورة الإيصال — المشاركة المباشرة غير مدعومة في هذا المتصفح')
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') showToast('error', 'فشلت المشاركة')
-    }
-  }
+  const shareWhatsApp  = () => shareAsImage('https://wa.me/', 'واتساب')
+  const shareTelegram  = () => shareAsImage('https://t.me/', 'تيليجرام')
+  const shareFacebook  = () => shareAsImage('https://www.facebook.com/', 'فيسبوك')
+  const shareGeneral   = () => shareAsImage()
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 modal-overlay">
@@ -173,7 +138,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 
         {/* Receipt Card */}
         <div className="p-5">
-          <div ref={receiptRef} className="receipt-card p-6 mx-auto" style={{ maxWidth: '480px' }}>
+          <div ref={receiptRef} className="mizo-mo-card p-6 mx-auto" style={{ maxWidth: '480px' }}>
             {/* Header */}
             <div className="flex items-center justify-between mb-6 pb-5 border-b border-blue-800/40">
               <div>
