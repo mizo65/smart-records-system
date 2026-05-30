@@ -256,3 +256,4 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
 }
 
 export default Receipt
+.
