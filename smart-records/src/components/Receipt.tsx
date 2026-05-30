@@ -39,7 +39,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     try {
       const canvas = await captureCanvas()
       const link = document.createElement('a')
-      link.download = `receipt-${record.reference_number}.png`
+      link.download = `mizi-mo-${record.reference_number}.png`
       link.href = canvas.toDataURL('image/png')
       link.click()
       showToast('success', 'تم تنزيل الإيصال PNG بنجاح')
@@ -50,7 +50,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
     try {
       const canvas = await captureCanvas()
       const link = document.createElement('a')
-      link.download = `receipt-${record.reference_number}.jpg`
+      link.download = `mizo-mo-${record.reference_number}.jpg`
       link.href = canvas.toDataURL('image/jpeg', 0.95)
       link.click()
       showToast('success', 'تم تنزيل الإيصال JPG بنجاح')
@@ -65,7 +65,7 @@ const Receipt: React.FC<Props> = ({ record, onClose }) => {
       const w = pdf.internal.pageSize.getWidth()
       const h = (canvas.height / canvas.width) * w
       pdf.addImage(imgData, 'PNG', 0, 0, w, h)
-      pdf.save(`receipt-${record.reference_number}.pdf`)
+      pdf.save(`mizo-mo-${record.reference_number}.pdf`)
       showToast('success', 'تم تنزيل الإيصال PDF بنجاح')
     } catch { showToast('error', 'فشل تنزيل الإيصال') }
   }
